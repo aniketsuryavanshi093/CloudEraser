@@ -205,50 +205,34 @@ Integrate ShareDB as the OT engine on the Node.js server. Replace the dumb relay
 **Status:** `[ ] pending`
 
 **Intent**
-Build the `/board/[id]` page with a full-featured Fabric.js canvas. The page has a **top navigation bar** that lets any user in the session switch between **Canvas mode** (whiteboard drawing) and **Document mode** (rich-text editor — Phase 2 stub for now). The top bar also contains a **live active users dropdown** showing every participant currently in the session with their avatar/name and an online indicator. Every local drawing action is converted into an OT operation and sent to the server. Incoming OT operations are applied silently (no echo).
+Build the `/board/[id]` page with a full-featured Fabric.js canvas. Every local drawing action is converted into an OT operation and sent to the server. Incoming OT operations from the server are applied to the canvas without triggering another outbound operation (avoiding infinite loops).
 
 **Expected Outcomes**
-- `/board/[id]` page has a persistent **SessionTopBar** above the canvas containing:
-  - **Mode tabs** — "Canvas" and "Document" pill/tab switcher; "Document" is visually present but disabled (greyed + "Coming in Phase 2" tooltip) in Phase 1
-  - **Session title** — board name, editable inline
-  - **Active users dropdown** — clicking opens a popover listing every user currently in the room: avatar (initials-based coloured circle), display name, and a green "live" dot. Count badge on the button (e.g. "3 users")
-  - **Share / invite button** stub
-- Below the top bar: full-viewport Fabric.js canvas
-- Toolbar (drawing tools) sits as a vertical sidebar or floating panel **below** the top bar
+- `/board/[id]` page renders a full-viewport Fabric.js canvas
 - Toolbar supports: freehand pencil, rectangle, circle, line, text label, select/move, color picker, stroke width
 - Every canvas mutation fires a `draw-op` via Socket.IO
 - Incoming `draw-op` events from the server update the canvas silently (no echo)
 - The canvas loads the board snapshot on join (cold start)
-- Cursor positions of other users are shown as colored dots with their name overlaid on the canvas (presence layer)
+- Cursor positions of other users are shown as colored dots with their name (presence layer)
 - The page is protected — unauthenticated users are redirected to `/login`
 
 **Todo List**
 1. Install `fabric` and `@types/fabric` in `apps/web`
-2. Create `apps/web/components/whiteboard/Canvas.tsx` — Fabric.js canvas wrapped in a React `useRef`, fills the space below the top bar
-3. Initialize Fabric.js in a `useEffect`; set canvas size to fill remaining viewport height
+2. Create `apps/web/components/whiteboard/Canvas.tsx` — Fabric.js canvas wrapped in a React `useRef`
+3. Initialize Fabric.js in a `useEffect`; set canvas size to fill viewport
 4. Create `apps/web/hooks/useSocket.ts` — connects to the Node.js server with the Supabase JWT in `auth` handshake
-5. Create `apps/web/hooks/usePresence.ts` — maintains a `Map<userId, { name, color, cursor }>` state updated by `user-joined`, `user-left`, and `cursor-move` socket events
-6. Create `apps/web/components/whiteboard/SessionTopBar.tsx` — top bar component containing:
-   - `ModeTabSwitcher` sub-component: "Canvas" (active) and "Document" (disabled with tooltip) tabs
-   - `SessionTitle` sub-component: inline-editable board title
-   - `ActiveUsersDropdown` sub-component: button showing user count badge; on click opens a popover with the live user list rendered from `usePresence` state; each row = coloured avatar circle + display name + green dot
-   - `ShareButton` sub-component: stub button (no functionality in Phase 1)
-7. On canvas `object:modified`, `object:added`, `object:removed` — serialize the delta as a `json0` op and emit `draw-op`
-8. Set a `_fromRemote` flag before applying incoming ops to suppress re-emission
-9. Create `apps/web/components/whiteboard/Toolbar.tsx` — vertical tool-panel with drawing mode buttons
-10. Create `apps/web/components/whiteboard/PresenceCursors.tsx` — absolutely-positioned SVG layer over the canvas rendering each remote user's cursor as a coloured dot + name label; driven by `usePresence`
-11. Emit `cursor-move` events on `mousemove` (throttled to 30 fps)
-12. On `board-snapshot` event: load the JSON state via `canvas.loadFromJSON()`
-13. Create the `/board/[id]` page route that composes: `SessionTopBar` + `Toolbar` + `Canvas` + `PresenceCursors`
+5. On canvas `object:modified`, `object:added`, `object:removed` — serialize the delta as a `json0` op and emit `draw-op`
+6. Set a `_fromRemote` flag before applying incoming ops to suppress re-emission
+7. Create `apps/web/components/whiteboard/Toolbar.tsx` — tool buttons wired to Fabric.js drawing modes
+8. Create `apps/web/components/whiteboard/PresenceCursors.tsx` — overlays colored cursors from `cursor-move` events
+9. Emit `cursor-move` events on `mousemove` (throttled to 30 fps)
+10. On `board-snapshot` event: load the JSON state via `canvas.loadFromJSON()`
+11. Create the `/board/[id]` page route that mounts Canvas + Toolbar + PresenceCursors
 
 **Relevant Context**
-- `SessionTopBar` is the single source of truth for the mode state (`"canvas" | "document"`); it passes the current mode down — in Phase 1 only `"canvas"` is ever active
-- `usePresence` hook is the single source of truth for the live user list — both `SessionTopBar`'s `ActiveUsersDropdown` and `PresenceCursors` consume it
-- User colour is deterministically derived from `userId` (e.g. `hsl(hash(userId) % 360, 70%, 55%)`) so colours are stable across reconnects
-- `_fromRemote` flag pattern: set `canvas._fromRemote = true` before `applyOp()`, reset at the top of every Fabric event handler to prevent echo
+- `_fromRemote` flag pattern: set `canvas._fromRemote = true` before `applyOp()`, reset in the event handler's first line to prevent echo
 - Fabric.js `canvas.toJSON()` / `canvas.loadFromJSON()` are the serialization entry points
 - `apps/web/lib/ot/client.ts` (from Sub-Task 5) is the bridge between Fabric events and Socket.IO
-- The `ModeTabSwitcher` "Document" tab emits no socket events in Phase 1 — clicking it shows a tooltip and stays on Canvas mode; in Phase 2 it will switch the view to the ProseMirror editor
 
 ---
 
@@ -359,19 +343,14 @@ Verify the complete user journey works end-to-end: sign up → create board → 
     │   │   ├── whiteboard/
     │   │   │   ├── Canvas.tsx
     │   │   │   ├── Toolbar.tsx
-    │   │   │   ├── PresenceCursors.tsx
-    │   │   │   ├── SessionTopBar.tsx        ← NEW: top bar (mode tabs + title + users dropdown)
-    │   │   │   ├── ModeTabSwitcher.tsx      ← NEW: "Canvas" / "Document" pill tabs
-    │   │   │   ├── ActiveUsersDropdown.tsx  ← NEW: live user count badge + popover list
-    │   │   │   └── ShareButton.tsx          ← NEW: share/invite stub
+    │   │   │   └── PresenceCursors.tsx
     │   │   ├── dashboard/
     │   │   │   ├── BoardCard.tsx
     │   │   │   └── NewBoardButton.tsx
     │   │   └── layout/Header.tsx
     │   ├── hooks/
     │   │   ├── useSocket.ts
-    │   │   ├── useUser.ts
-    │   │   └── usePresence.ts               ← NEW: live user list from socket events
+    │   │   └── useUser.ts
     │   ├── lib/
     │   │   ├── supabase/
     │   │   │   ├── client.ts
@@ -393,24 +372,6 @@ Verify the complete user journey works end-to-end: sign up → create board → 
         ├── lib/
         │   └── supabase.ts
         └── Dockerfile
-```
-
-### SessionTopBar — Layout Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  [Canvas] [Document*]   │  Board Title ✎  │  [👥 3 users ▾]  [Share]│
-└─────────────────────────────────────────────────────────────────────┘
-   * Document tab = disabled in Phase 1, greyed + "Coming soon" tooltip
-
-Active Users Dropdown (open state):
-┌─────────────────────────┐
-│ 🟢  Alice  (you)        │
-│ 🟢  Bob                 │
-│ 🟢  Carol               │
-└─────────────────────────┘
-  Each row: coloured avatar circle + name + live green dot
-  Colour = deterministic hash of userId → hsl value
 ```
 
 ---
