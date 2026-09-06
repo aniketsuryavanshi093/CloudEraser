@@ -64,7 +64,7 @@ Create the root folder structure, `docker-compose.yml`, and all `package.json` /
 
 ### Sub-Task 2 — Authentication (Supabase Auth)
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
 Wire up Supabase Auth so users can register/login with email+password and Google OAuth. The authenticated user's JWT is passed to the Node.js backend on every Socket.IO connection so the server can verify identity before allowing board access.
