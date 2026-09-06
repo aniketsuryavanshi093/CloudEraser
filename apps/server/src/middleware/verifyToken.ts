@@ -1,26 +1,25 @@
-import type { User } from '@supabase/supabase-js';
-import { supabaseAdmin } from '../lib/supabase';
+import { jwtDecrypt, type JWTPayload } from 'jose';
+
+export interface AuthenticatedToken extends JWTPayload {
+  sub: string;
+  email?: string;
+}
 
 /**
- * Validates a Supabase JWT using the service-role client.
- *
- * The service-role client calls Supabase's `/auth/v1/user` endpoint which
- * verifies the JWT signature server-side — no local secret required.
- *
- * @param token - The raw JWT from the Socket.IO handshake `auth` payload.
- * @returns The authenticated Supabase `User` object.
- * @throws If the token is missing, malformed, or expired.
+ * Decrypts and validates the encrypted JWT issued by NextAuth/Auth.js.
+ * The Socket.IO client must send this token in handshake.auth.token.
  */
-export async function verifyToken(token: string): Promise<User> {
-  if (!token) {
-    throw new Error('No token provided');
-  }
+export async function verifyToken(token: string): Promise<AuthenticatedToken> {
+  if (!token) throw new Error('No token provided');
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) throw new Error('NEXTAUTH_SECRET is not configured');
 
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  const { payload } = await jwtDecrypt(
+    token,
+    new TextEncoder().encode(secret),
+    { clockTolerance: 15 },
+  );
 
-  if (error || !data.user) {
-    throw new Error(error?.message ?? 'Invalid or expired token');
-  }
-
-  return data.user;
+  if (!payload.sub) throw new Error('Invalid token: missing subject');
+  return payload as AuthenticatedToken;
 }

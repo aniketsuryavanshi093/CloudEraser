@@ -2,12 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
+import { signIn } from 'next-auth/react';
 
 export default function LoginPage() {
-  const router = useRouter();
-  const supabase = createClient();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,40 +16,26 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const result = await signIn('credentials', {
       email,
       password,
+      redirect: false,
+      callbackUrl: '/dashboard',
     });
 
-    if (signInError) {
-      setError(signInError.message);
+    if (!result || result.error) {
+      setError('Invalid email or password.');
       setLoading(false);
       return;
     }
 
-    router.push('/dashboard');
-    router.refresh();
+    window.location.assign(result.url ?? '/dashboard');
   }
 
   async function handleGoogleLogin() {
     setLoading(true);
     setError(null);
-
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
-
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${siteUrl}/auth/callback`,
-      },
-    });
-
-    if (oauthError) {
-      setError(oauthError.message);
-      setLoading(false);
-    }
-    // On success the browser is redirected by Supabase — no further action needed.
+    await signIn('google', { callbackUrl: '/dashboard' });
   }
 
   return (

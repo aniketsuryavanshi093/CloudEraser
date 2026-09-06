@@ -48,3 +48,5 @@ coverage/
 .turbo/
 .cache/
 .parcel-cache/
+
+# Prisma local state and generated artifacts`r`nprisma/generated/`r`n
