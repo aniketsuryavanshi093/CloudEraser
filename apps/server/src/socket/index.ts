@@ -4,25 +4,14 @@ import type { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import { getBoard } from '../db/boards';
 import { verifyToken } from '../middleware/verifyToken';
+import { getCanvasDocument, submitCanvasOperation } from '../ot/sharedb';
+import { ClientToServerEvents, DrawOperation,JoinBoardPayload,JoinBoardResponse,OperationResponse, ServerToClientEvents, SocketData } from '../Types/SocketEventTypes';
 
-export interface DrawOperation {
-  id: string;
-  type: string;
-  payload: unknown;
-}
 
-interface JoinBoardPayload {
-  boardId: string;
-}
-
-interface SocketData {
-  userId: string;
-  email?: string;
-  boardId?: string;
-}
-
-export async function createSocketServer(httpServer: HttpServer): Promise<Server<never, never, never, SocketData>> {
-  const io = new Server<never, never, never, SocketData>(httpServer, {
+export async function createSocketServer(
+  httpServer: HttpServer,
+): Promise<Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>> {
+  const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(httpServer, {
     cors: {
       origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
       credentials: true,
@@ -33,8 +22,8 @@ export async function createSocketServer(httpServer: HttpServer): Promise<Server
   if (redisUrl) {
     const pubClient = createClient({ url: redisUrl });
     const subClient = pubClient.duplicate();
-    pubClient.on('error', (error) => console.error('Redis publisher error', error));
-    subClient.on('error', (error) => console.error('Redis subscriber error', error));
+    pubClient.on('error', (error: Error) => console.error('Redis publisher error', error));
+    subClient.on('error', (error: Error) => console.error('Redis subscriber error', error));
     await Promise.all([pubClient.connect(), subClient.connect()]);
     io.adapter(createAdapter(pubClient, subClient));
     console.log('Socket.IO Redis adapter enabled');
@@ -54,17 +43,41 @@ export async function createSocketServer(httpServer: HttpServer): Promise<Server
     }
   });
 
+  const wiredDocuments = new Set<string>();
+
   io.on('connection', (socket) => {
-    socket.on('join-board', async (payload: JoinBoardPayload, acknowledge?: (response: unknown) => void) => {
+    socket.on('join-board', async (payload: JoinBoardPayload, acknowledge?: (response: JoinBoardResponse) => void) => {
       try {
         if (!payload?.boardId) throw new Error('boardId is required');
         await getBoard(payload.boardId, socket.data.userId);
+        const document = await getCanvasDocument(payload.boardId);
+
+        if (!wiredDocuments.has(payload.boardId)) {
+          wiredDocuments.add(payload.boardId);
+          document.on('op', (operation: unknown, source: unknown) => {
+            io.to(payload.boardId).emit('draw-op', {
+              operation: {
+                id: `server-${document.version ?? 0}`,
+                type: 'canvas-op',
+                payload: operation,
+                version: document.version ?? undefined,
+              },
+              userId: typeof source === 'string' ? source : undefined,
+              version: document.version,
+            });
+          });
+        }
 
         if (socket.data.boardId) {
           socket.leave(socket.data.boardId);
         }
         socket.join(payload.boardId);
         socket.data.boardId = payload.boardId;
+        socket.emit('board-snapshot', {
+          boardId: payload.boardId,
+          data: document.data,
+          version: document.version,
+        });
 
         socket.to(payload.boardId).emit('user-joined', {
           userId: socket.data.userId,
@@ -76,18 +89,17 @@ export async function createSocketServer(httpServer: HttpServer): Promise<Server
       }
     });
 
-    socket.on('draw-op', (operation: DrawOperation, acknowledge?: (response: unknown) => void) => {
+    socket.on('draw-op', (operation: DrawOperation, acknowledge?: (response: OperationResponse) => void) => {
       const boardId = socket.data.boardId;
       if (!boardId || !operation?.id || !operation.type) {
         acknowledge?.({ ok: false, error: 'Invalid drawing operation' });
         return;
       }
 
-      socket.to(boardId).emit('draw-op', {
-        operation,
-        userId: socket.data.userId,
-      });
-      acknowledge?.({ ok: true, operationId: operation.id });
+      void getCanvasDocument(boardId)
+        .then((document) => submitCanvasOperation(document, operation.payload, socket.data.userId))
+        .then(() => acknowledge?.({ ok: true, operationId: operation.id }))
+        .catch(() => acknowledge?.({ ok: false, error: 'Operation rejected' }));
     });
 
     socket.on('cursor-move', (position: { x: number; y: number }) => {
