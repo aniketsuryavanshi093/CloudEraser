@@ -12,8 +12,8 @@ Build a **real-time collaborative platform** from scratch in two phases:
 |---|---|
 | Frontend | Next.js (App Router, TypeScript) |
 | Backend | Node.js + Express + Socket.IO (Dockerized) |
-| Auth | Supabase Auth — email/password + Google OAuth |
-| Database | Supabase Postgres |
+| Auth | Auth.js / NextAuth — email/password + Google OAuth |
+| Database | PostgreSQL through Prisma ORM |
 | Real-time state sync | ShareDB (Operational Transformation engine) over Socket.IO |
 | Canvas rendering | Fabric.js |
 | Horizontal scaling bus | Redis (Socket.IO Redis Adapter only) |
@@ -24,7 +24,7 @@ Build a **real-time collaborative platform** from scratch in two phases:
 - Rich text / Google Docs-style editing — **deferred to Phase 2**
 - Video/audio communication
 - File export (PDF/PNG) — not in scope yet
-- Full OT op-log persistence (MemoryBackend + Supabase snapshot flush is sufficient; undo/redo is Phase 2)
+- Full OT op-log persistence (MemoryBackend + PostgreSQL snapshot flush is sufficient; undo/redo is Phase 2)
 
 ---
 
@@ -62,67 +62,64 @@ Create the root folder structure, `docker-compose.yml`, and all `package.json` /
 
 ---
 
-### Sub-Task 2 — Authentication (Supabase Auth)
+### Sub-Task 2 — Authentication (Auth.js + Prisma)
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
-Wire up Supabase Auth so users can register/login with email+password and Google OAuth. The authenticated user's JWT is passed to the Node.js backend on every Socket.IO connection so the server can verify identity before allowing board access.
+Wire up Auth.js so users can register/login with email+password and Google OAuth. Prisma stores users, accounts, and sessions. The authenticated Auth.js token is passed to the Node.js backend on every Socket.IO connection so the server can verify identity before allowing board access.
 
 **Expected Outcomes**
 - `/login` and `/register` pages exist in Next.js with working forms
-- Google OAuth button triggers Supabase OAuth flow and redirects back
-- A `useUser()` hook (or Supabase client helper) exposes the current session
+- Google OAuth button triggers Auth.js OAuth flow and redirects back
+- A `useUser()` hook (or Auth.js client helper) exposes the current session
 - Protected routes redirect unauthenticated users to `/login`
-- The Node.js server validates the Supabase JWT on WebSocket handshake and rejects invalid connections
+- The Node.js server validates the Auth.js JWT on WebSocket handshake and rejects invalid connections
 
 **Todo List**
-1. Create Supabase project; copy `SUPABASE_URL` and `SUPABASE_ANON_KEY` into `.env`
-2. Enable Google OAuth provider in Supabase dashboard (set redirect URL)
-3. Install `@supabase/supabase-js` and `@supabase/ssr` in `apps/web`
-4. Create `apps/web/lib/supabase/client.ts` (browser client) and `server.ts` (server component client)
-5. Create Next.js middleware (`middleware.ts`) to protect routes via Supabase session cookie
+1. Configure Google OAuth credentials and `NEXTAUTH_SECRET` in `.env`
+2. Enable Google OAuth provider and configure its callback URL in Google Cloud Console
+3. Install `next-auth`, `@next-auth/prisma-adapter`, and `bcryptjs` in `apps/web`
+4. Create `apps/web/src/lib/auth.ts`, `apps/web/src/lib/prisma.ts`, and Auth.js route handlers
+5. Create Next.js middleware (`middleware.ts`) to protect routes via Auth.js session cookie
 6. Build `/login` page — email/password form + Google OAuth button
 7. Build `/register` page — email/password sign-up form
-8. Create `/auth/callback` route handler for OAuth redirect
-9. Create `useUser()` custom hook using `@supabase/ssr`
-10. On the Node.js server: install `@supabase/supabase-js` (service-role key) and write `middleware/verifyToken.ts` that decodes the Supabase JWT from the Socket.IO handshake auth payload
+8. Auth.js manages OAuth callbacks through `/api/auth/[...nextauth]`
+9. Create `useUser()` custom hook using `next-auth/react`
+10. On the Node.js server: install `jose` and write `middleware/verifyToken.ts` that decrypts the Auth.js JWT from the Socket.IO handshake auth payload
 11. Reject Socket connections whose token is missing or invalid
 
 **Relevant Context**
-- `apps/web/lib/supabase/` — all Supabase client factories live here
-- `apps/server/middleware/verifyToken.ts` — Socket.IO connection middleware
-- Environment variables needed: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- `apps/web/src/lib/auth.ts` and `apps/web/src/lib/prisma.ts` — Auth.js and Prisma helpers
+- `apps/server/src/middleware/verifyToken.ts` — Socket.IO connection middleware
+- Environment variables needed: `DATABASE_URL`, `NEXTAUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 
 ---
 
-### Sub-Task 3 — Database Schema (Supabase Postgres)
+### Sub-Task 3 — Database Schema (PostgreSQL + Prisma)
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
-Define the data model in Supabase Postgres for users, boards, and board snapshots. The board snapshot stores the latest serialized canvas state so a newly joining user loads the current state without replaying every historical OT operation.
+Define the data model in PostgreSQL using Prisma for users, boards, and board snapshots. The board snapshot stores the latest serialized canvas state so a newly joining user loads the current state without replaying every historical OT operation.
 
 **Expected Outcomes**
-- `boards` table created with `id`, `owner_id`, `title`, `created_at`
-- `board_snapshots` table stores the latest JSON canvas state per board
-- `board_members` join table for access control (owner / editor roles)
-- Row-Level Security (RLS) policies ensure users only access boards they own or are members of
-- A Supabase migration file documents all schema changes
+- Prisma models exist for users, Auth.js accounts/sessions, boards, snapshots, and memberships
+- `prisma/schema.prisma` is the single database schema source of truth
+- Prisma migrations document all schema changes
+- Board membership authorization is enforced in the Node.js repository layer
 
 **Todo List**
-1. Create `supabase/migrations/001_initial_schema.sql` with DDL for `boards`, `board_snapshots`, `board_members`
-2. Enable RLS on all three tables
-3. Write RLS policies: owners can do all, members can SELECT and UPDATE snapshots
-4. Create `apps/server/lib/supabase.ts` — Supabase service-role client for server-side DB access
-5. Create `apps/server/db/boards.ts` — typed CRUD helpers: `createBoard`, `getBoard`, `upsertSnapshot`, `getSnapshot`
-6. Create Next.js server action / API route to create a new board and redirect to `/board/[id]`
-7. Create a `/dashboard` page listing the user's boards with a "New Board" button
+1. Create `prisma/schema.prisma` with `User`, `Account`, `Session`, `VerificationToken`, `Board`, `BoardSnapshot`, and `BoardMember` models
+2. Create Prisma migrations for the schema
+3. Create `apps/server/src/lib/prisma.ts` and typed `apps/server/src/db/boards.ts` helpers
+4. Create Next.js server actions and `/dashboard` using Prisma
 
 **Relevant Context**
 - `board_snapshots.state` column is `jsonb` — stores the full Fabric.js canvas JSON
 - Snapshot is upserted (not appended) — only the latest state matters for cold-join loading
 - OT operation history is held in-memory in ShareDB (not persisted in phase 1)
+- PostgreSQL is the durable store through Prisma
 
 ---
 
@@ -134,7 +131,7 @@ Define the data model in Supabase Postgres for users, boards, and board snapshot
 Build the core Socket.IO server that handles board rooms, broadcasts drawing events between clients, and attaches the Redis adapter for horizontal scaling. This sub-task does NOT include OT yet — it establishes the event plumbing first.
 
 **Expected Outcomes**
-- Server accepts WebSocket connections authenticated by Supabase JWT
+- Server accepts WebSocket connections authenticated by Auth.js JWT
 - Clients can emit `join-board` with a `boardId` and be placed in the correct Socket.IO room
 - Server relays `draw-op` events to all other members of the same room
 - `user-joined` and `user-left` presence events are broadcast to the room
@@ -220,7 +217,7 @@ Build the `/board/[id]` page with a full-featured Fabric.js canvas. Every local 
 1. Install `fabric` and `@types/fabric` in `apps/web`
 2. Create `apps/web/components/whiteboard/Canvas.tsx` — Fabric.js canvas wrapped in a React `useRef`
 3. Initialize Fabric.js in a `useEffect`; set canvas size to fill viewport
-4. Create `apps/web/hooks/useSocket.ts` — connects to the Node.js server with the Supabase JWT in `auth` handshake
+4. Create `apps/web/hooks/useSocket.ts` — connects to the Node.js server with the Auth.js JWT in `auth` handshake
 5. On canvas `object:modified`, `object:added`, `object:removed` — serialize the delta as a `json0` op and emit `draw-op`
 6. Set a `_fromRemote` flag before applying incoming ops to suppress re-emission
 7. Create `apps/web/components/whiteboard/Toolbar.tsx` — tool buttons wired to Fabric.js drawing modes
@@ -244,25 +241,25 @@ Build the `/board/[id]` page with a full-featured Fabric.js canvas. Every local 
 Build the authenticated home screen where users manage their boards — create new boards, see existing ones, and navigate into them.
 
 **Expected Outcomes**
-- `/dashboard` lists the user's boards (title, last updated) fetched from Supabase
+- `/dashboard` lists the user's boards (title, last updated) fetched from Auth.js
 - "New Board" button creates a board via server action and redirects to `/board/[id]`
 - Each board card links to `/board/[id]`
 - Board title is editable inline
 - User avatar + logout button in header
 
 **Todo List**
-1. Create `apps/web/app/dashboard/page.tsx` — server component that fetches boards via Supabase server client
+1. Create `apps/web/src/app/dashboard/page.tsx` — server component that fetches boards through Prisma
 2. Create `apps/web/components/dashboard/BoardCard.tsx` — card component with title, date, link
-3. Create `apps/web/app/actions/board.ts` — `createBoard` server action (inserts row, returns new ID)
+3. Create `apps/web/src/app/actions/board.ts` — `createBoard` server action using `getServerSession`
 4. Create `apps/web/components/dashboard/NewBoardButton.tsx` — calls server action, redirects
-5. Add inline title editing: `PATCH /api/boards/[id]` API route updates `boards.title` in Supabase
-6. Create `apps/web/components/layout/Header.tsx` — user avatar, username, logout (calls `supabase.auth.signOut()`)
+5. Add inline title editing: `PATCH /api/boards/[id]` API route updates `boards.title` through Prisma
+6. Create `apps/web/components/layout/Header.tsx` — user avatar, username, logout through Auth.js
 7. Add root layout redirect: unauthenticated users at `/` go to `/login`, authenticated users go to `/dashboard`
 
 **Relevant Context**
-- Server actions live in `apps/web/app/actions/`
-- Supabase server client: `apps/web/lib/supabase/server.ts`
-- RLS ensures the query `SELECT * FROM boards WHERE owner_id = auth.uid()` is automatically scoped
+- Server actions live in `apps/web/src/app/actions/`
+- Auth.js configuration: `apps/web/src/lib/auth.ts`
+- Prisma client: `apps/web/src/lib/prisma.ts`
 
 ---
 
@@ -271,11 +268,11 @@ Build the authenticated home screen where users manage their boards — create n
 **Status:** `[ ] pending`
 
 **Intent**
-Persist the canvas state to Supabase so that when a user opens a board after it has been idle, they load the last known state rather than a blank canvas. The server periodically upserts the ShareDB document snapshot into the `board_snapshots` table.
+Persist the canvas state to PostgreSQL through Prisma so that when a user opens a board after it has been idle, they load the last known state rather than a blank canvas. The server periodically upserts the ShareDB document snapshot into the `board_snapshots` table.
 
 **Expected Outcomes**
 - When the last user leaves a board room, the server saves the current ShareDB snapshot to `board_snapshots`
-- When the first user joins an empty room, the server loads the snapshot from Supabase into ShareDB's memory before sending it to the client
+- When the first user joins an empty room, the server loads the snapshot from PostgreSQL through Prisma into ShareDB's memory before sending it to the client
 - The whiteboard page loads with the correct previous state, not blank
 
 **Todo List**
@@ -287,7 +284,7 @@ Persist the canvas state to Supabase so that when a user opens a board after it 
 
 **Relevant Context**
 - `db.upsertSnapshot` / `db.getSnapshot` — helpers from Sub-Task 3
-- ShareDB `MemoryBackend` does not persist across server restarts; Supabase is the durable store
+- ShareDB `MemoryBackend` does not persist across server restarts; PostgreSQL through Prisma is the durable store
 - The periodic flush prevents data loss if the server crashes while users are active
 
 ---
@@ -352,9 +349,8 @@ Verify the complete user journey works end-to-end: sign up → create board → 
     │   │   ├── useSocket.ts
     │   │   └── useUser.ts
     │   ├── lib/
-    │   │   ├── supabase/
-    │   │   │   ├── client.ts
-    │   │   │   └── server.ts
+    │   │   ├── auth.ts
+    │   │   ├── prisma.ts
     │   │   └── ot/
     │   │       └── client.ts
     │   ├── middleware.ts
@@ -370,7 +366,7 @@ Verify the complete user journey works end-to-end: sign up → create board → 
         ├── db/
         │   └── boards.ts
         ├── lib/
-        │   └── supabase.ts
+        │   └── prisma.ts
         └── Dockerfile
 ```
 
@@ -414,7 +410,7 @@ The `ALGORITHM.md` file will cover:
 
 > **Status: Planned — not started. Implement only after Phase 1 is fully complete and stable.**
 
-Phase 2 reuses the entire Phase 1 infrastructure (auth, Socket.IO server, ShareDB, Redis, Supabase) and adds a rich-text document editing experience alongside the whiteboard.
+Phase 2 reuses the entire Phase 1 infrastructure (Auth.js, Socket.IO server, ShareDB, Redis, Prisma) and adds a rich-text document editing experience alongside the whiteboard.
 
 ---
 
@@ -426,15 +422,15 @@ Phase 2 reuses the entire Phase 1 infrastructure (auth, Socket.IO server, ShareD
 Extend the database schema to support text documents. A document is a separate entity from a whiteboard board — different content type, same room/session model.
 
 **Expected Outcomes**
-- `documents` table in Supabase Postgres: `id`, `owner_id`, `title`, `created_at`
+- `documents` table in Auth.js Postgres: `id`, `owner_id`, `title`, `created_at`
 - `document_snapshots` table: `document_id`, `content` (jsonb — ProseMirror/Quill JSON), `updated_at`
 - `document_members` join table: `document_id`, `user_id`, `role`
 - RLS policies mirroring the board tables
 - Dashboard updated to show both Boards and Documents tabs
 
 **Todo List**
-1. Create `supabase/migrations/002_documents_schema.sql` with DDL for `documents`, `document_snapshots`, `document_members`
-2. Add RLS policies for document tables
+1. Extend `prisma/schema.prisma` with `Document`, `DocumentSnapshot`, and `DocumentMember` models
+2. Create a Prisma migration for the document tables
 3. Add `getDocument`, `upsertDocumentSnapshot`, `getDocumentSnapshot` DB helpers in `apps/server/db/documents.ts`
 4. Update `/dashboard` to show a "Documents" tab alongside "Boards"
 5. Create a "New Document" server action that inserts a row and redirects to `/doc/[id]`
@@ -455,7 +451,7 @@ Integrate ProseMirror as the rich-text editor on the `/doc/[id]` page. ProseMirr
 **Expected Outcomes**
 - `/doc/[id]` page renders a full ProseMirror editor
 - Toolbar: bold, italic, underline, headings (H1–H3), bullet list, numbered list, blockquote
-- Editor loads the document snapshot from Supabase on first open
+- Editor loads the document snapshot from Auth.js on first open
 - Editor is protected — unauthenticated users are redirected to `/login`
 
 **Todo List**
@@ -505,7 +501,7 @@ Wire ProseMirror transactions to ShareDB using the `rich-text` OT type (or `pros
 **Status:** `[ ] pending`
 
 **Intent**
-Persist document content to Supabase using the same flush strategy as Phase 1 boards — upsert on last-user-leave, periodic 60s flush, load on first-join.
+Persist document content to Auth.js using the same flush strategy as Phase 1 boards — upsert on last-user-leave, periodic 60s flush, load on first-join.
 
 **Expected Outcomes**
 - Document content survives server restarts
@@ -538,7 +534,7 @@ Update the dashboard to surface both boards and documents in a unified UI, with 
 - Header links updated
 
 **Todo List**
-1. Update `apps/web/app/dashboard/page.tsx` to fetch both boards and documents in parallel (two Supabase queries)
+1. Update `apps/web/app/dashboard/page.tsx` to fetch both boards and documents in parallel (two Auth.js queries)
 2. Add `DocumentCard.tsx` component mirroring `BoardCard.tsx`
 3. Add tab switcher component to dashboard
 4. Add "New Document" button wired to server action
@@ -578,4 +574,4 @@ apps/
 | `sharedb-rich-text` OT type | Consistent with Phase 1 ShareDB server; same transform contract |
 | Same Socket.IO server | Documents use new event names on the same server — no new container needed |
 | Same Redis adapter | Horizontal scaling works identically for doc rooms |
-| Supabase snapshot flush | Same strategy as Phase 1 — no new persistence pattern to learn |
+| Auth.js snapshot flush | Same strategy as Phase 1 — no new persistence pattern to learn |
