@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import type { BoardListItem } from '@/types/board';
-import type { ListBoardsResult } from '@/types/actions';
+import type { ListBoardsResult, UpdateBoardTitleResult } from '@/types/actions';
 
 export async function createBoard(title?: string): Promise<never> {
   const session = await getServerSession(authOptions);
@@ -49,5 +49,30 @@ export async function listBoards(): Promise<ListBoardsResult> {
     return { boards: serializedBoards };
   } catch {
     return { boards: [], error: 'Unable to load boards' };
+  }
+}
+
+export async function updateBoardTitle(boardId: string, title: string): Promise<UpdateBoardTitleResult> {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) return { error: 'Authentication required' };
+  const cleanTitle = title.trim();
+  if (!boardId || !cleanTitle) return { error: 'A board ID and title are required' };
+  if (cleanTitle.length > 120) return { error: 'Title must be 120 characters or fewer' };
+
+  try {
+    const member = await prisma.boardMember.findUnique({
+      where: { boardId_userId: { boardId, userId: session.user.id } },
+      select: { role: true },
+    });
+    if (!member || member.role === 'VIEWER') return { error: 'You do not have permission to rename this board' };
+
+    const board = await prisma.board.update({
+      where: { id: boardId },
+      data: { title: cleanTitle },
+      select: { title: true },
+    });
+    return { title: board.title };
+  } catch {
+    return { error: 'Unable to update board title' };
   }
 }
