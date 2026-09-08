@@ -9,3 +9,8 @@ export interface CreateBoardResult {
   board?: BoardListItem;
   error?: string;
 }
+
+export interface UpdateBoardTitleResult {
+  title?: string;
+  error?: string;
+}

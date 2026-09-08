@@ -1,6 +1,6 @@
-import ShareDB, { type Error as ShareDBError } from 'sharedb';
+import ShareDB, { type Error as ShareDBError } from "sharedb";
 
-export const CANVAS_DOC_TYPE = 'json0';
+export const CANVAS_DOC_TYPE = "json0";
 
 export interface CanvasDocument {
   objects: Record<string, unknown>;
@@ -12,16 +12,19 @@ type ShareDoc = ShareDB.Doc;
 const backend = new ShareDB();
 const docs = new Map<string, ShareDoc>();
 
-function initialCanvas(): CanvasDocument {
-  return { objects: {}, background: '#ffffff' };
+function initialCanvas(snapshot?: CanvasDocument): CanvasDocument {
+  return snapshot ?? { objects: {}, background: "#ffffff" };
 }
 
-export async function getCanvasDocument(boardId: string): Promise<ShareDoc> {
+export async function getCanvasDocument(
+  boardId: string,
+  snapshot?: CanvasDocument,
+): Promise<ShareDoc> {
   const existing = docs.get(boardId);
   if (existing) return existing;
 
   const connection = backend.connect();
-  const doc = connection.get('boards', boardId);
+  const doc = connection.get("boards", boardId);
 
   await new Promise<void>((resolve, reject) => {
     doc.fetch((error: ShareDBError) => {
@@ -30,10 +33,14 @@ export async function getCanvasDocument(boardId: string): Promise<ShareDoc> {
         return;
       }
       if (doc.type === null) {
-        doc.create(initialCanvas(), CANVAS_DOC_TYPE, (createError: ShareDBError) => {
-          if (createError) reject(createError);
-          else resolve();
-        });
+        doc.create(
+          initialCanvas(snapshot),
+          CANVAS_DOC_TYPE,
+          (createError: ShareDBError) => {
+            if (createError) reject(createError);
+            else resolve();
+          },
+        );
       } else {
         resolve();
       }
@@ -44,7 +51,11 @@ export async function getCanvasDocument(boardId: string): Promise<ShareDoc> {
   return doc;
 }
 
-export function submitCanvasOperation(doc: ShareDoc, operation: unknown, source?: string): Promise<void> {
+export function submitCanvasOperation(
+  doc: ShareDoc,
+  operation: unknown,
+  source?: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     doc.submitOp(operation, { source }, (error: ShareDBError) => {
       if (error) reject(error);

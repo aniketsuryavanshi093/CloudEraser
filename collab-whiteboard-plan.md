@@ -125,7 +125,7 @@ Define the data model in PostgreSQL using Prisma for users, boards, and board sn
 
 ### Sub-Task 4 — Node.js Real-Time Server (Socket.IO + Redis Adapter)
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
 Build the core Socket.IO server that handles board rooms, broadcasts drawing events between clients, and attaches the Redis adapter for horizontal scaling. This sub-task does NOT include OT yet — it establishes the event plumbing first.
@@ -159,7 +159,7 @@ Build the core Socket.IO server that handles board rooms, broadcasts drawing eve
 
 ### Sub-Task 5 — Operational Transformation Layer (ShareDB + ALGORITHM.md)
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
 Integrate ShareDB as the OT engine on the Node.js server. Replace the dumb relay of Sub-Task 4 with a proper OT pipeline: each `draw-op` is an OT operation that ShareDB transforms against concurrent operations before applying, guaranteeing all clients converge to the same state. Write `ALGORITHM.md` explaining every step.
@@ -199,7 +199,7 @@ Integrate ShareDB as the OT engine on the Node.js server. Replace the dumb relay
 
 ### Sub-Task 6 — Canvas Frontend (Fabric.js Whiteboard)
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
 Build the `/board/[id]` page with a full-featured Fabric.js canvas. Every local drawing action is converted into an OT operation and sent to the server. Incoming OT operations from the server are applied to the canvas without triggering another outbound operation (avoiding infinite loops).
@@ -235,7 +235,7 @@ Build the `/board/[id]` page with a full-featured Fabric.js canvas. Every local 
 
 ### Sub-Task 7 — Dashboard & Board Management UI
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
 Build the authenticated home screen where users manage their boards — create new boards, see existing ones, and navigate into them.
@@ -265,7 +265,7 @@ Build the authenticated home screen where users manage their boards — create n
 
 ### Sub-Task 8 — Snapshot Persistence & Cold-Join Load
 
-**Status:** `[ ] pending`
+**Status:** `[x] done`
 
 **Intent**
 Persist the canvas state to PostgreSQL through Prisma so that when a user opens a board after it has been idle, they load the last known state rather than a blank canvas. The server periodically upserts the ShareDB document snapshot into the `board_snapshots` table.
